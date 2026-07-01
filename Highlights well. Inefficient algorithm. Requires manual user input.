@@ -1,0 +1,152 @@
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Dim ws As Worksheet
+    Dim selectedRow As Long
+    Dim i As Long, j As Long
+
+    Set ws = Me
+
+    ' ╔══════════════════════════════════════════════════════╗
+    ' ║           USER MANUAL — ADJUST THESE VALUES          ║
+    ' ║                                                      ║
+    ' ║  HOW TO FIND ROW/COLUMN NUMBERS:                     ║
+    ' ║  Click any cell → read the Name Box (top left).      ║
+    ' ║  A=1, Z=26, AA=27, AW=49, CR=98 etc.                ║
+    ' ╚══════════════════════════════════════════════════════╝
+
+    ' ── CAUSE ROWS ──────────────────────────────────────────
+    Dim dataStart       As Long : dataStart       = 62   ' first cause row
+    Dim dataEnd         As Long : dataEnd         = 83   ' last cause row
+    Dim causeDescCol    As Long : causeDescCol    = 16   ' col P = description
+    Dim causeTagCol     As Long : causeTagCol     = 38   ' col AL = tag number
+
+    ' ── EFFECT COLUMNS ──────────────────────────────────────
+    Dim effectColStart  As Long : effectColStart  = 49   ' col AW = effect 01
+    Dim effectColEnd    As Long : effectColEnd    = 98   ' col CR = effect 50
+
+    ' ── EFFECT HEADER ROWS ──────────────────────────────────
+    Dim hdrStart        As Long : hdrStart        = 2
+    Dim hdrEnd          As Long : hdrEnd          = 58
+    Dim rowRefDoc1      As Long : rowRefDoc1      = 12
+    Dim rowV            As Long : rowV            = 23
+    Dim rowDesc1        As Long : rowDesc1        = 24
+    Dim rowAction1      As Long : rowAction1      = 44
+    Dim rowTag1         As Long : rowTag1         = 50
+    Dim rowEffNo        As Long : rowEffNo        = 59
+
+    ' ── SUMMARY ─────────────────────────────────────────────
+    Dim summaryRowStart As Long : summaryRowStart = 87
+    Dim summaryColStart As Long : summaryColStart = 1
+    Dim summaryColEnd   As Long : summaryColEnd   = 98
+
+    ' ════════════════════════════════════════════════════════
+    '  DO NOT EDIT BELOW THIS LINE
+    ' ════════════════════════════════════════════════════════
+
+    selectedRow = Target.Row
+    If selectedRow < dataStart Or selectedRow > dataEnd Then Exit Sub
+    If Target.Column > effectColStart - 1 Then Exit Sub
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    ' ── Reset cause highlights ───────────────────────────────
+    For i = dataStart To dataEnd
+        ws.Cells(i, causeTagCol).Interior.ColorIndex = xlNone
+        ws.Cells(i, causeDescCol).Interior.ColorIndex = xlNone
+    Next i
+
+    ' ── Reset effect highlights ──────────────────────────────
+    ws.Range(ws.Cells(hdrStart, effectColStart), _
+             ws.Cells(dataEnd, effectColEnd)).Interior.ColorIndex = xlNone
+
+    ' ── Highlight selected cause cells ──────────────────────
+    ws.Cells(selectedRow, causeTagCol).Interior.Color = RGB(255, 220, 50)
+    ws.Cells(selectedRow, causeDescCol).Interior.Color = RGB(255, 220, 50)
+
+    ' ── Collect active effects and highlight ─────────────────
+    Dim effCount As Long : effCount = 0
+    Dim activeEffects(1 To 50, 1 To 6) As String
+
+    For j = effectColStart To effectColEnd
+        If Trim(ws.Cells(selectedRow, j).Value) <> "" Then
+            ws.Cells(selectedRow, j).Interior.Color = RGB(255, 220, 50)
+            ws.Range(ws.Cells(hdrStart, j), ws.Cells(hdrEnd, j)).Interior.Color = RGB(255, 220, 50)
+
+            effCount = effCount + 1
+            activeEffects(effCount, 1) = Trim(ws.Cells(rowEffNo,   j).Value)
+            activeEffects(effCount, 2) = Trim(ws.Cells(rowTag1,    j).Value)
+            activeEffects(effCount, 3) = Trim(ws.Cells(rowAction1, j).Value)
+            activeEffects(effCount, 4) = Trim(ws.Cells(rowDesc1,   j).Value)
+            activeEffects(effCount, 5) = Trim(ws.Cells(rowV,       j).Value)
+            activeEffects(effCount, 6) = Trim(ws.Cells(rowRefDoc1, j).Value)
+        End If
+    Next j
+
+    ' ── Clear previous summary ───────────────────────────────
+    Dim summaryRowEnd As Long : summaryRowEnd = summaryRowStart + 52
+    On Error Resume Next
+    ws.Range(ws.Cells(summaryRowStart, summaryColStart), _
+             ws.Cells(summaryRowEnd, summaryColEnd)).UnMerge
+    On Error GoTo 0
+    ws.Range(ws.Cells(summaryRowStart, summaryColStart), _
+             ws.Cells(summaryRowEnd, summaryColEnd)).ClearContents
+    ws.Range(ws.Cells(summaryRowStart, summaryColStart), _
+             ws.Cells(summaryRowEnd, summaryColEnd)).Interior.ColorIndex = xlNone
+
+    ' ── Write summary header ─────────────────────────────────
+    Dim causeDesc As String : causeDesc = Trim(ws.Cells(selectedRow, causeDescCol).Value)
+    Dim causeTag  As String : causeTag  = Trim(ws.Cells(selectedRow, causeTagCol).Value)
+
+    ws.Range(ws.Cells(summaryRowStart, summaryColStart), _
+             ws.Cells(summaryRowStart, summaryColEnd)).Merge
+
+    With ws.Cells(summaryRowStart, summaryColStart)
+        If effCount = 0 Then
+            .Value = "> " & causeTag & "  |  " & causeDesc & "  |  No active effects"
+        Else
+            .Value = "> " & causeTag & "  |  " & causeDesc & _
+                     "  |  ACTIVE EFFECTS: " & effCount
+        End If
+        .Font.Bold = True
+        .Font.Size = 10
+        .Font.Color = RGB(31, 78, 121)
+        .Interior.Color = RGB(189, 215, 238)
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlCenter
+        .WrapText = False
+    End With
+    ws.Rows(summaryRowStart).RowHeight = 22
+
+    ' ── Write one effect per row ─────────────────────────────
+    Dim r As Long
+    For r = 1 To effCount
+        Dim outRow As Long : outRow = summaryRowStart + r
+
+        ws.Range(ws.Cells(outRow, summaryColStart), _
+                 ws.Cells(outRow, summaryColEnd)).Merge
+
+        With ws.Cells(outRow, summaryColStart)
+            .Value = "  Effect " & activeEffects(r, 1) & _
+                     "   |   Tag: "    & activeEffects(r, 2) & _
+                     "   |   Action: " & activeEffects(r, 3) & _
+                     "   |   Desc: "   & activeEffects(r, 4) & _
+                     "   |   V: "      & activeEffects(r, 5) & _
+                     "   |   REF: "    & activeEffects(r, 6)
+            .Font.Bold = False
+            .Font.Size = 9
+            .Font.Color = RGB(131, 60, 0)
+            .Interior.Color = RGB(252, 228, 214)
+            .HorizontalAlignment = xlLeft
+            .VerticalAlignment = xlCenter
+            .WrapText = False
+        End With
+        ws.Rows(outRow).RowHeight = 18
+    Next r
+
+    ' ── Restore Excel settings ───────────────────────────────
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+End Sub
