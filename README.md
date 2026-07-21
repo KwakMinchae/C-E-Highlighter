@@ -1,4 +1,4 @@
-# Cause & Effect Matrix — Row/Column Highlighter
+# Cause & Effect Matrix Highlighter
 
 VBA tool for Excel Cause & Effect (C&E) matrix sheets. Click any cause row and the
 entire row plus every matching effect column highlights automatically, with a
@@ -8,9 +8,9 @@ readable text summary of active effects written below the table.
 
 - Click a cause row → highlights the **whole row** and **every effect column** with
   a mark in that row (full column height, no exceptions)
-- Writes a readable summary strip below the table — one line per active effect,
+- Writes a readable summary strip below the table. There is one line per active effect,
   since the effect header labels are rotated/vertical and hard to read at a glance
-- Auto-adapts as rows/columns are added — no manual reconfiguration needed for
+- Auto-adapts as rows/columns are added. No manual reconfiguration needed for
   edits made *inside* the existing table bounds, and a live auto-refresh handles
   edits at the edges too
 
