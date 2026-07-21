@@ -50,8 +50,26 @@ End Sub
 ' manually re-run SetupOneSheet. Only re-measures and re-stores the four numbers —
 ' does NOT clear colors or rebuild the summary block, so it stays fast even if it
 ' fires on every edit.
-Public Sub RefreshBoundaries(ws As Worksheet)
+Public Sub RefreshBoundaries(ws As Worksheet, Optional Target As Range)
     If Not NameExists(ws, "CEMeta") Then Exit Sub   ' full setup hasn't run yet — nothing to refresh
+
+    ' Cheap short-circuit: if we know which cell(s) were edited and they're safely
+    ' inside the already-known table bounds, nothing could have changed the edges —
+    ' skip the expensive scan entirely. This is the common case (filling in existing
+    ' cells), so this avoids most of the cost on most edits.
+    If Not Target Is Nothing Then
+        Dim curMeta() As String
+        curMeta = Split(ws.Names("CEMeta").RefersToRange.Value, "|")
+        If UBound(curMeta) >= 3 Then
+            Dim curDataEnd As Long, curEffEnd As Long
+            curDataEnd = CLng(curMeta(1))
+            curEffEnd = CLng(curMeta(3))
+            Dim targetBottom As Long, targetRight As Long
+            targetBottom = Target.Row + Target.Rows.Count - 1
+            targetRight = Target.Column + Target.Columns.Count - 1
+            If targetBottom < curDataEnd And targetRight < curEffEnd Then Exit Sub
+        End If
+    End If
 
     Dim causeDataEnd As Long
     causeDataEnd = FindLastRowAcross(ws, CAUSE_DATA_START, 1, EFFECT_COL_START - 1)
@@ -166,6 +184,37 @@ Public Sub InjectStubIntoAllSheets()
            "Skipped " & skippedCount & " sheet(s) that already had matching code.", vbInformation
 End Sub
 
+' Upgrades the Worksheet_Change stub on every sheet to pass Target through, enabling
+' the short-circuit optimization in RefreshBoundaries above. Safe to run any time —
+' skips sheets that don't have the old exact line, so it won't touch anything else.
+Public Sub UpgradeChangeStubsForPerformance()
+    Dim vbProj As Object
+    Set vbProj = ThisWorkbook.VBProject
+
+    Dim ws As Worksheet, comp As Object, codeMod As Object
+    Dim updatedCount As Long, skippedCount As Long, i As Long, lineText As String
+
+    For Each ws In ThisWorkbook.Worksheets
+        Set comp = vbProj.VBComponents(ws.CodeName)
+        Set codeMod = comp.CodeModule
+        Dim found As Boolean
+        found = False
+        For i = 1 To codeMod.CountOfLines
+            lineText = codeMod.Lines(i, 1)
+            If InStr(1, lineText, "modCauseEffectSetup.RefreshBoundaries Me", vbTextCompare) > 0 _
+               And InStr(1, lineText, "Target", vbTextCompare) = 0 Then
+                codeMod.ReplaceLine i, "    modCauseEffectSetup.RefreshBoundaries Me, Target"
+                found = True
+                Exit For
+            End If
+        Next i
+        If found Then updatedCount = updatedCount + 1 Else skippedCount = skippedCount + 1
+    Next ws
+
+    MsgBox "Upgraded " & updatedCount & " sheet(s)." & vbCrLf & _
+           skippedCount & " sheet(s) skipped (already upgraded, or no matching line found).", vbInformation
+End Sub
+
 Public Sub SetupOneSheet(sheetName As String)
     SetupSheetAnchors ThisWorkbook.Worksheets(sheetName)
     MsgBox "Setup complete for '" & sheetName & "'.", vbInformation
@@ -174,6 +223,14 @@ End Sub
 Public Sub RunSetupAllSheets()
     Dim ws As Worksheet
     Dim failedSheets As String, okCount As Long
+
+    ' Screen redraw and recalculation on every single cell write across 274 sheets is
+    ' by far the slowest part of this — disabling both here cuts runtime dramatically.
+    Dim prevCalc As XlCalculation
+    prevCalc = Application.Calculation
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+
     For Each ws In ThisWorkbook.Worksheets
         On Error Resume Next
         Err.Clear
@@ -185,6 +242,10 @@ Public Sub RunSetupAllSheets()
         End If
         On Error GoTo 0
     Next ws
+
+    Application.Calculation = prevCalc
+    Application.ScreenUpdating = True
+
     If Len(failedSheets) > 0 Then
         MsgBox "Setup finished." & vbCrLf & okCount & " sheet(s) OK." & vbCrLf & failedSheets, vbExclamation
     Else
