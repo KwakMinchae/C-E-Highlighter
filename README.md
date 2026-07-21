@@ -1,96 +1,102 @@
-# Cause & Effect Matrix Highlighter
+[README (1).md](https://github.com/user-attachments/files/30209185/README.1.md)
+# Cause & Effect matrix highlighter. Installation & Setup Guide
 
-VBA tool for Excel Cause & Effect (C&E) matrix sheets. Click any cause row and the
-entire row plus every matching effect column highlights automatically, with a
-readable text summary of active effects written below the table.
+## What this does
 
-## What it does
-
-- Click a cause row → highlights the **whole row** and **every effect column** with
-  a mark in that row (full column height, no exceptions)
-- Writes a readable summary strip below the table. There is one line per active effect,
-  since the effect header labels are rotated/vertical and hard to read at a glance
-- Auto-adapts as rows/columns are added. No manual reconfiguration needed for
-  edits made *inside* the existing table bounds, and a live auto-refresh handles
-  edits at the edges too
+Click any cause row → the whole row and every matching effect column highlight
+yellow. A readable summary of active effects is written below the table (the
+effect header labels are rotated/vertical in the original sheet — this writes
+them out horizontally instead). Boundaries auto-adjust as rows/columns are added.
 
 ## Files
 
-| File | Purpose |
-|---|---|
-| `modCauseEffectSetup.bas` | Run once per sheet. Detects table boundaries and prepares the sheet. |
-| `modCauseEffectHighlighter.bas` | Runs on every click. Does the actual highlighting. |
+- `modCauseEffectSetup.bas` — one-time setup logic, plus the tools to roll it out
+  across all 274 sheets at once
+- `modCauseEffectHighlighter.bas` — runs on every click, does the highlighting
 
-## How it works
+---
 
-Four facts define the whole table. Two are fixed (same on every sheet, since they
-share one template); two are auto-detected per sheet:
+## Step 1 — Get the file to actually open with macros enabled
 
-| | Value | How it's determined |
-|---|---|---|
-| Cause rows start | Row 61 | Fixed constant |
-| Effect columns start | Column AW (49) | Fixed constant |
-| Cause rows end | *(varies)* | Auto-detected — scans across the cause block's columns, bounded to a sane range, ignoring its own leftover output |
-| Effect columns end | *(varies)* | Auto-detected — scans across the effect block's rows, bounded to a sane range |
+Skip this section if your file already opens without security warnings.
 
-Highlighting is done with direct cell coloring (`.Interior.Color`), not Conditional
-Formatting — CF formulas hit unpredictable Excel-specific behavior in early
-versions and were dropped in favor of something simpler to verify.
+1. If Windows blocked the file entirely (**"Microsoft has blocked macros from
+   running because the source of this file is untrusted"**, no Enable button):
+   close Excel, right-click the file in File Explorer → **Properties** → check
+   **Unblock** at the bottom of the General tab → OK → reopen.
+   - If there's no Unblock checkbox, that's an IT-managed policy — contact your
+     IT/helpdesk to allowlist the file, this can't be fixed from Excel itself.
+2. Once open, if you see a yellow **"SECURITY WARNING — Macros have been
+   disabled"** bar with an **Enable Content** button, click it.
+3. If no bar appears at all: **File → Options → Trust Center → Trust Center
+   Settings → Macro Settings → "Disable VBA macros with notification"** → OK →
+   close and fully reopen the file → click Enable Content when the bar appears.
 
-## Installation (per sheet)
+## Step 2 — Enable one more setting (needed for the automated rollout in Step 4)
 
-1. Open the VBA editor: **Alt+F11**
-2. Import both modules: right-click the workbook in the Project tree →
-   **Import File...** → select `modCauseEffectSetup.bas`. Repeat for
-   `modCauseEffectHighlighter.bas`.
-3. Double-click the target sheet in the Project tree and paste in:
+**File → Options → Trust Center → Trust Center Settings → Macro Settings** →
+check **"Trust access to the VBA project object model"** → OK.
 
-   ```vba
-   Private Sub Worksheet_SelectionChange(ByVal Target As Range)
-       modCauseEffectHighlighter.HandleCauseSelection Me, Target
-   End Sub
+## Step 3 — Import the two modules
 
-   Private Sub Worksheet_Change(ByVal Target As Range)
-       modCauseEffectSetup.RefreshBoundaries Me
-   End Sub
-   ```
+1. **Alt+F11** to open the VBA editor.
+2. Right-click the workbook in the Project tree → **Import File...** → select
+   `modCauseEffectSetup.bas`. Repeat for `modCauseEffectHighlighter.bas`.
 
-4. In the Immediate window (**Ctrl+G**), click the line and press **Enter**:
+## Step 4 — Roll out to all 274 sheets
 
-   ```
-   SetupOneSheet "SheetNameHere"
-   ```
+In the Immediate window (**Ctrl+G**), run each line separately (click the line,
+press Enter, wait for its popup before running the next):
 
-5. Click a real cause row to test — the row and its matching effect column(s)
-   should highlight yellow, and a summary line should appear below the table.
-   
-<img width="921" height="400" alt="image" src="https://github.com/user-attachments/assets/694399d0-c1e0-493a-86c4-9959a26f8dae" />
+```
+InjectStubIntoAllSheets
+```
+Adds the click-handler hookup to every sheet automatically. Popup confirms how
+many sheets were updated vs. already had it.
 
-### Rolling out to all sheets
+```
+RunSetupAllSheets
+```
+Detects each sheet's table boundaries and builds its summary block. Takes a
+couple of minutes across 274 sheets (mostly the summary block formatting) —
+this is expected, not a hang. Popup confirms success or lists any sheet that
+failed and why.
 
-Repeat steps 3–4 for each sheet, or call `RunSetupAllSheets()` from the Immediate
-window to run setup on every sheet in the workbook at once (step 3's stub still
-needs to be added to each sheet individually).
+## Step 5 — Test
+
+Click any real cause row on any sheet. The row and its matching effect column(s)
+should highlight yellow, and a summary line should appear below the table.
+
+---
 
 ## Maintenance
 
-- **Adding causes/effects inside the existing table** — no action needed;
-  `Worksheet_Change` refreshes the boundaries automatically.
-- **Adding causes/effects past the current known edge** — one extra row past the
-  edge works automatically (a small buffer is built in); beyond that, re-run
-  `SetupOneSheet "SheetName"` once.
-- **Cleaning up stray summary text** left over from earlier testing/edits:
-
+- **Adding causes/effects inside the existing table bounds** — nothing needed,
+  updates live via the auto-refresh hook.
+- **Adding causes/effects right past the current known edge** — one extra row
+  past the edge still works via a small built-in buffer; beyond that, re-run
+  setup on that one sheet:
   ```
-  CleanupOldSummaryDebris "SheetName", 300
+  SetupOneSheet "SheetNameHere"
+  ```
+- **Stray leftover summary text** from testing/edits — safe to run any time,
+  only ever touches column A below your real data:
+  ```
+  CleanupOldSummaryDebris "SheetNameHere", 300
   ```
 
-  (adjust `300` to a row comfortably below your table; this only ever touches
-  column A and only below your real data, so it can't affect real content)
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| "Compile error: Sub or Function not defined" | One of the two modules failed to import correctly, or there's a duplicate/corrupted module. Debug → Compile VBAProject to find the exact broken line. |
+| Clicking does nothing, on one specific sheet only | That sheet is missing its stub — re-run `InjectStubIntoAllSheets`, or check the sheet's code module directly. |
+| Clicking does nothing, on every sheet | Events may be stuck disabled from an earlier error. Run `Application.EnableEvents = True` in the Immediate window. |
+| Setup errors on a specific sheet | That sheet's layout may not match the shared template — check the exact error message, it names the row/column it expected. |
 
 ## Customization
 
-Formatting and header-row constants live at the top of `modCauseEffectSetup.bas`:
+Fixed positions and effect-header row constants — top of `modCauseEffectSetup.bas`:
 
 ```vba
 Public Const CAUSE_DATA_START As Long = 61
@@ -102,5 +108,5 @@ Public Const ROW_ACTION As Long = 44
 Public Const ROW_TAG_NUMBER As Long = 50
 ```
 
-Highlight color and summary text styling (font, size, colors) are set in
-`modCauseEffectHighlighter.bas`, inside `HandleCauseSelection`.
+Highlight color and summary text styling — inside `HandleCauseSelection` in
+`modCauseEffectHighlighter.bas`.
