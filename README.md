@@ -63,6 +63,8 @@ versions and were dropped in favor of something simpler to verify.
 
 5. Click a real cause row to test — the row and its matching effect column(s)
    should highlight yellow, and a summary line should appear below the table.
+   
+<img width="921" height="400" alt="image" src="https://github.com/user-attachments/assets/694399d0-c1e0-493a-86c4-9959a26f8dae" />
 
 ### Rolling out to all sheets
 
