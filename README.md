@@ -1,5 +1,4 @@
-[README (1).md](https://github.com/user-attachments/files/30209185/README.1.md)
-# Cause & Effect matrix highlighter. Installation & Setup Guide
+# Cause & Effect Matrix — Installation & Setup Guide
 
 ## What this does
 
