@@ -18,6 +18,14 @@ Option Explicit
 Public Const CAUSE_DATA_START As Long = 61
 Public Const EFFECT_COL_START As Long = 49   ' AW
 
+' Effect-side header rows (confirmed directly against the live sheet — these are the
+' TOP row of each merged label block, since that's where a merged cell's value lives)
+Public Const ROW_REF_DOC As Long = 12
+Public Const ROW_VOTING As Long = 23
+Public Const ROW_DESCRIPTION As Long = 24
+Public Const ROW_ACTION As Long = 44
+Public Const ROW_TAG_NUMBER As Long = 50
+
 ' Run this to find out EXACTLY which cell is causing the "last column" scan to jump
 ' further right than expected — e.g.: DiagnoseWidth "Sheet2", 2, 200
 Public Sub DiagnoseWidth(sheetName As String, rowFrom As Long, rowTo As Long)
@@ -35,6 +43,127 @@ Public Sub DiagnoseWidth(sheetName As String, rowFrom As Long, rowTo As Long)
     Debug.Print "Furthest-right content in rows " & rowFrom & "-" & rowTo & ":"
     Debug.Print "  Row " & worstRow & ", column " & worst & " (" & ws.Cells(worstRow, worst).Address(False, False) & _
                 ") = '" & ws.Cells(worstRow, worst).Value & "'"
+End Sub
+
+' Lightweight refresh — call this from Worksheet_Change so adding new cause rows or
+' effect columns updates the stored boundaries automatically, without needing to
+' manually re-run SetupOneSheet. Only re-measures and re-stores the four numbers —
+' does NOT clear colors or rebuild the summary block, so it stays fast even if it
+' fires on every edit.
+Public Sub RefreshBoundaries(ws As Worksheet)
+    If Not NameExists(ws, "CEMeta") Then Exit Sub   ' full setup hasn't run yet — nothing to refresh
+
+    Dim causeDataEnd As Long
+    causeDataEnd = FindLastRowAcross(ws, CAUSE_DATA_START, 1, EFFECT_COL_START - 1)
+    If causeDataEnd < CAUSE_DATA_START Then Exit Sub
+
+    Dim lastEffectCol As Long
+    lastEffectCol = FindLastColAcross(ws, EFFECT_COL_START, 2, causeDataEnd)
+    If lastEffectCol < EFFECT_COL_START Then Exit Sub
+
+    ' Writing to metaCell below is itself a "cell changed" event — without turning
+    ' events off first, it would immediately re-trigger this same sub on this same
+    ' sheet, risking infinite recursion now that every sheet has Worksheet_Change.
+    On Error GoTo CleanFail
+    Application.EnableEvents = False
+    Dim metaCell As Range
+    Set metaCell = ws.Names("CEMeta").RefersToRange
+    metaCell.Value = CAUSE_DATA_START & "|" & causeDataEnd & "|" & EFFECT_COL_START & "|" & lastEffectCol
+    Application.EnableEvents = True
+    Exit Sub
+
+CleanFail:
+    Application.EnableEvents = True
+End Sub
+
+Private Function NameExists(ws As Worksheet, nm As String) As Boolean
+    Dim n As Name
+    On Error Resume Next
+    Set n = ws.Names(nm)
+    NameExists = (Err.Number = 0) And Not (n Is Nothing)
+    Err.Clear
+    On Error GoTo 0
+End Function
+
+' Run this to wipe out old summary debris scattered from previous setup runs at
+' different row positions. Automatically starts right after your real cause data ends
+' (read from CEMeta) so it can never touch real data, and only touches column A —
+' e.g.: CleanupOldSummaryDebris "Sheet2", 300
+Public Sub CleanupOldSummaryDebris(sheetName As String, rowTo As Long)
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Worksheets(sheetName)
+
+    If Not NameExists(ws, "CEMeta") Then
+        MsgBox "Run SetupOneSheet on this sheet first — I need to know where your real data ends before I can clean up safely.", vbExclamation
+        Exit Sub
+    End If
+
+    Dim meta() As String
+    meta = Split(ws.Names("CEMeta").RefersToRange.Value, "|")
+    Dim dataEnd As Long
+    dataEnd = CLng(meta(1))
+
+    Dim rowFrom As Long
+    rowFrom = dataEnd + 1   ' safely below all real cause data — this can never touch it
+
+    Dim r As Long
+    Application.DisplayAlerts = False
+    Application.EnableEvents = False
+    For r = rowFrom To rowTo
+        On Error Resume Next
+        ws.Cells(r, 1).UnMerge
+        ws.Cells(r, 1).ClearContents
+        ws.Cells(r, 1).Interior.ColorIndex = xlNone
+        On Error GoTo 0
+    Next r
+    Application.EnableEvents = True
+    Application.DisplayAlerts = True
+    MsgBox "Cleaned column A, rows " & rowFrom & " to " & rowTo & ".", vbInformation
+End Sub
+
+' Injects the Worksheet_SelectionChange / Worksheet_Change stub into EVERY sheet
+' automatically, skipping any sheet that already has one. Requires "Trust access to
+' the VBA project object model" enabled once (File > Options > Trust Center >
+' Trust Center Settings > Macro Settings).
+Public Sub InjectStubIntoAllSheets()
+    Dim vbProj As Object
+    Set vbProj = ThisWorkbook.VBProject
+
+    Dim stubSelChange As String, stubChange As String
+    stubSelChange = "Private Sub Worksheet_SelectionChange(ByVal Target As Range)" & vbCrLf & _
+                    "    modCauseEffectHighlighter.HandleCauseSelection Me, Target" & vbCrLf & _
+                    "End Sub"
+    stubChange = "Private Sub Worksheet_Change(ByVal Target As Range)" & vbCrLf & _
+                 "    modCauseEffectSetup.RefreshBoundaries Me" & vbCrLf & _
+                 "End Sub"
+
+    Dim ws As Worksheet, comp As Object, codeMod As Object, existingCode As String
+    Dim addedCount As Long, skippedCount As Long, addedSomething As Boolean
+
+    For Each ws In ThisWorkbook.Worksheets
+        Set comp = vbProj.VBComponents(ws.CodeName)
+        Set codeMod = comp.CodeModule
+        If codeMod.CountOfLines > 0 Then
+            existingCode = codeMod.Lines(1, codeMod.CountOfLines)
+        Else
+            existingCode = ""
+        End If
+        addedSomething = False
+
+        If InStr(1, existingCode, "Worksheet_SelectionChange", vbTextCompare) = 0 Then
+            codeMod.InsertLines codeMod.CountOfLines + 1, stubSelChange
+            addedSomething = True
+        End If
+        If InStr(1, existingCode, "Worksheet_Change", vbTextCompare) = 0 Then
+            codeMod.InsertLines codeMod.CountOfLines + 1, stubChange
+            addedSomething = True
+        End If
+
+        If addedSomething Then addedCount = addedCount + 1 Else skippedCount = skippedCount + 1
+    Next ws
+
+    MsgBox "Stub added to " & addedCount & " sheet(s)." & vbCrLf & _
+           "Skipped " & skippedCount & " sheet(s) that already had matching code.", vbInformation
 End Sub
 
 Public Sub SetupOneSheet(sheetName As String)
@@ -64,6 +193,12 @@ Public Sub RunSetupAllSheets()
 End Sub
 
 Public Sub SetupSheetAnchors(ws As Worksheet)
+    ' This sub writes to many cells while building the table (colors, metadata, the
+    ' summary block) — with Worksheet_Change now on every sheet, those writes would
+    ' otherwise re-trigger RefreshBoundaries mid-setup. Guard against that here, and
+    ' guarantee it's restored even if one of this sub's own validation errors fires.
+    On Error GoTo CleanFail
+    Application.EnableEvents = False
 
     ' ---- End of cause rows: scan every column in the cause block, take the furthest down ----
     Dim causeDataEnd As Long
@@ -114,6 +249,16 @@ Public Sub SetupSheetAnchors(ws As Worksheet)
     notesCol = paddedLastEffectCol + 2
     SetupSummaryBlock ws, paddedDataEnd, notesCol
 
+    Application.EnableEvents = True
+    Exit Sub
+
+CleanFail:
+    Dim errNum As Long, errDesc As String, errSrc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    errSrc = Err.Source
+    Application.EnableEvents = True
+    Err.Raise errNum, errSrc, errDesc   ' re-raise so callers (e.g. RunSetupAllSheets) still see the real error
 End Sub
 
 ' Scans every column in [colFrom, colTo] and returns the furthest-down populated row
@@ -167,6 +312,26 @@ Private Sub DefineName(ws As Worksheet, nm As String, rng As Range)
 End Sub
 
 Private Sub SetupSummaryBlock(ws As Worksheet, dataEnd As Long, notesCol As Long)
+
+    ' Wipe out any OLD summary block left at a previous position before building the
+    ' new one — otherwise every re-run leaves another patch of stray text behind.
+    ' Only touches column A, cell by cell — never a wide range, which risks colliding
+    ' with unrelated merged cells elsewhere on the sheet.
+    If NameExists(ws, "SummaryAnchorCell") Then
+        Dim oldRow As Long
+        oldRow = ws.Names("SummaryAnchorCell").RefersToRange.Row
+        Dim wr As Long
+        Application.DisplayAlerts = False
+        For wr = oldRow To oldRow + 200
+            On Error Resume Next
+            ws.Cells(wr, 1).UnMerge
+            ws.Cells(wr, 1).ClearContents
+            ws.Cells(wr, 1).Interior.ColorIndex = xlNone
+            On Error GoTo 0
+        Next wr
+        Application.DisplayAlerts = True
+    End If
+
     Dim summaryStartRow As Long
     summaryStartRow = dataEnd + 3
 
